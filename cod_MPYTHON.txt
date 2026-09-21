@@ -1,0 +1,165 @@
+from machine import Pin, I2C, Timer
+import time
+import struct
+
+
+MPU = 0x68  # Direccion I2C del MPU6050
+
+# I2C
+# SDA = GPIO 21
+# SCL = GPIO 22
+i2c = I2C(
+    0,
+    sda=Pin(21),
+    scl=Pin(22),
+    freq=400000
+)
+
+# Variables globales
+axRaw = 0
+ayRaw = 0
+azRaw = 0
+
+gxRaw = 0
+gyRaw = 0
+gzRaw = 0
+
+tempRaw = 0
+
+# Bandera del temporizador
+listo = False
+
+
+def cadaCiclo(timer):
+    global listo
+    
+    # Solo avisamos que toca realizar una lectura
+    listo = True
+
+
+def iniciarMPU():
+    
+    # Registro PWR_MGMT_1 = 0x6B
+    # Escribir 0x00 despierta el MPU6050
+    
+    i2c.writeto_mem(
+        MPU,
+        0x6B,
+        b'\x00'
+    )
+
+def leerSensor():
+    global axRaw, ayRaw, azRaw
+    global gxRaw, gyRaw, gzRaw
+    global tempRaw
+    
+    # Leer 14 bytes desde ACCEL_XOUT_H (0x3B)
+    datos = i2c.readfrom_mem(
+        MPU,
+        0x3B,
+        14
+    )
+    
+    # Los datos del MPU6050 son enteros de 16 bits
+    # con formato Big Endian
+    (
+        axRaw,
+        ayRaw,
+        azRaw,
+        tempRaw,
+        gxRaw,
+        gyRaw,
+        gzRaw
+    ) = struct.unpack(">hhhhhhh", datos)
+
+
+def enviarDatos():
+    
+    # --------------------------------------------------------
+    # ACELEROMETRO
+    # Rango configurado por defecto: +/- 2 g
+    # Sensibilidad: 16384 LSB/g
+    # --------------------------------------------------------
+    
+    ax = axRaw / 16384.0
+    ay = ayRaw / 16384.0
+    az = azRaw / 16384.0
+    
+    
+    # --------------------------------------------------------
+    # GIROSCOPIO
+    # Rango configurado por defecto: +/- 250 grados/s
+    # Sensibilidad: 131 LSB/(grados/s)
+    # --------------------------------------------------------
+    
+    gx = gxRaw / 131.0
+    gy = gyRaw / 131.0
+    gz = gzRaw / 131.0
+    
+    
+    # --------------------------------------------------------
+    # TEMPERATURA
+    # Formula indicada para el MPU6050
+    # --------------------------------------------------------
+    
+    temp = tempRaw / 340.0 + 36.53
+    
+    
+    # --------------------------------------------------------
+    # SALIDA SERIAL
+    #
+    # Formato:
+    # ax,ay,az,gx,gy,gz,temp
+    # --------------------------------------------------------
+    
+    print(
+        "{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.2f}".format(
+            ax,
+            ay,
+            az,
+            gx,
+            gy,
+            gz,
+            temp
+        )
+    )
+
+
+# Esperar a que el sensor estabilice
+time.sleep_ms(100)
+
+# Despertar MPU6050
+iniciarMPU()
+
+# Crear temporizador
+miTimer = Timer(0)
+
+# Ejecutar cada 50 ms
+# 50 ms = 0.05 s
+# frecuencia = 1 / 0.05 = 20 Hz
+miTimer.init(
+    period=50,
+    mode=Timer.PERIODIC,
+    callback=cadaCiclo
+)
+
+print("MPU6050 iniciado")
+print("ax,ay,az,gx,gy,gz,temp")
+
+# LOOP PRINCIPAL
+
+while True:
+    
+    if listo:
+        
+        # Bajar bandera
+        listo = False
+        
+        # Leer MPU6050
+        leerSensor()
+        
+        # Convertir y enviar datos
+        enviarDatos()
+    
+    # Pequeña pausa para no saturar el procesador
+    time.sleep_ms(1)
